@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const CustomPropertySchema = new mongoose.Schema(
   {
     title: String,
-    value: {
+    defaultValue: {
       type: String,
       default: "Ahmedabad",
     },
@@ -11,7 +11,6 @@ const CustomPropertySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export const Customproperty = mongoose.model(
-  "Customproperty",
-  CustomPropertySchema
-);
+const CustomProperty = mongoose.model("CustomProperty", CustomPropertySchema);
+
+export { CustomProperty, CustomPropertySchema };

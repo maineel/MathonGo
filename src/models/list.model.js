@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import {CustomPropertySchema} from "./customProperty.model.js";
 
 const ListSchema = new mongoose.Schema(
   {
