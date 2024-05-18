@@ -1,70 +1,205 @@
-import {List} from "../models/list.model.js";
+import { List } from "../models/list.model.js";
 import fs from "fs";
-import fastcsv from "fast-csv";
-import createCsvWriter from "csv-writer";
+import { User } from "../models/user.model.js";
+import multer from "multer";
+import csvParser from "csv-parser";
+import { format } from "fast-csv";
+import path from "path";
+import { fileURLToPath } from "url";
+import nodemailer from "nodemailer";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const upload = multer({ dest: path.join(__dirname, "../uploads/") });
+const uploads = upload.single("file");
+
+const transporter = nodemailer.createTransport({
+  host: "smtp.ethereal.email",
+  port: 587,
+  auth: {
+    user: "armani93@ethereal.email",
+    pass: "XjPpSfP8ZTudxhp4er",
+  },
+});
+
+// ==================================================== Controller Logic ====================================================
 
 const listController = async (req, res) => {
   try {
-    const { title, customProperties } = req.body;
-    const list = new List({ title, customProperties });
-    await list.save();
-
-    res.status(201).json({ list });
+    const { title, properties } = req.body;
+    const newList = new List({ title, properties });
+    await newList.save();
+    res.status(201).json(newList);
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Something went wrong." });
+    res.status(500).json({ error: error.message });
   }
 };
 
 const userController = async (req, res) => {
-  try {
-    const { listId } = req.params;
-    const list = await List.findById(listId);
-    const fileRows = [];
-    const errors = [];
+  const { listId } = req.params;
+  const results = [];
+  const errors = [];
+  const successfullyAddedUsers = [];
 
-    fastcsv
-      .parseFile(req.file.path)
-      .on("data", function (data) {
-        const user = { name: data[0], email: data[1], listId };
-        list.customProperties.forEach((prop, index) => {
-          user[prop.title] = data[index + 2] || prop.default_value;
-        });
-        fileRows.push(user);
-      })
-      .on("end", async function () {
-        fs.unlinkSync(req.file.path);
-        for (const row of fileRows) {
+  fs.createReadStream(req.file.path)
+    .pipe(csvParser())
+    .on("data", (data) => results.push(data))
+    .on("end", async () => {
+      try {
+        const list = await List.findById(listId);
+        if (!list) {
+          return res.status(404).json({ error: "List not found" });
+        }
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const row of results) {
           try {
-            await User.create(row);
+            const { name, email, ...customProperties } = row;
+            if (!name || !email) {
+              throw new Error("Name and Email are required fields");
+            }
+
+            const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailPattern.test(email)) {
+              throw new Error("Email is invalid");
+            }
+
+            const existingUser = await User.findOne({ email, list: listId });
+            if (existingUser) {
+              throw new Error("Duplicate email");
+            }
+
+            const userProps = {};
+            list.properties.forEach((prop) => {
+              userProps[prop.title] =
+                customProperties[prop.title] || prop.fallbackValue;
+            });
+
+            const newUser = new User({
+              name,
+              email,
+              list: listId,
+              customProperties: userProps,
+            });
+            await newUser.save();
+            successfullyAddedUsers.push(newUser);
+            successCount++;
           } catch (error) {
-            errors.push({ ...row, error: error.toString() });
+            errorCount++;
+            errors.push({ ...row, error: error.message });
           }
         }
 
-        if (errors.length > 0) {
-          const csvWriter = createCsvWriter.createObjectCsvWriter({
-            path: "out.csv",
-            header: Object.keys(errors[0]).map((key) => ({
-              id: key,
-              title: key,
-            })),
-          });
-          await csvWriter.writeRecords(errors);
-        }
+        const totalCount = await User.countDocuments({ list: listId });
 
-        res.send({
-          message: "Users added successfully",
-          added: fileRows.length - errors.length,
-          errors: errors.length,
-          total: await User.countDocuments({ listId }),
-          errorFile: errors.length > 0 ? "out.csv" : null,
+        if (errors.length > 0) {
+          const errorCsvPath = path.join(__dirname, "../uploads/errors.csv");
+          const ws = fs.createWriteStream(errorCsvPath);
+          const csvStream = format({ headers: true });
+
+          csvStream.pipe(ws).on("end", () => ws.end());
+
+          errors.forEach((errorRow) => csvStream.write(errorRow));
+          csvStream.end();
+
+          ws.on("finish", async () => {
+            res.setHeader(
+              "Content-disposition",
+              "attachment; filename=errors.csv"
+            );
+            res.set("Content-Type", "text/csv");
+            fs.createReadStream(errorCsvPath)
+              .pipe(res)
+              .on("finish", () => {
+                fs.unlink(req.file.path, () => {});
+                fs.unlink(errorCsvPath, () => {});
+              });
+          });
+        } else {
+          res.status(200).json({
+            successCount,
+            errorCount,
+            totalCount,
+          });
+
+          console.log(successfullyAddedUsers);
+          await sendEmailsToUsers(successfullyAddedUsers);
+
+          fs.unlink(req.file.path, () => {});
+        }
+      } catch (error) {
+        const totalCount = await User.countDocuments({ list: listId });
+        res.status(500).json({
+          error: error.message,
+          successCount,
+          errorCount,
+          totalCount,
         });
-      });
+      }
+    });
+};
+
+const sendEmail = async (to, subject, html) => {
+  try {
+    const info = await transporter.sendMail({
+      from: '"Neel Sheth" <neel.s2@ahduni.edu.in>',
+      to: to,
+      subject: subject,
+      html: html,
+    });
+    console.log("Email sent:", info.messageId);
+    return info.messageId;
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Something went wrong." });
+    console.error("Error sending email:", error);
+    throw error;
   }
 };
 
-export { listController, userController };
+const sendEmailsToUsers = async (users) => {
+  const unsubscribeBaseUrl = "http://localhost:8000/api/v1/admin/unsubscribe/";
+  const subject = "Welcome to MathonGo";
+  const emailTemplate =
+    "Hey [name]!<br><br>Thank you for signing up with your email [email]. We have received your city as [city].<br><br> <b>Team MathonGo.</b>";
+
+  for (const user of users) {
+    const emailBody = emailTemplate.replace(
+      /\[(.*?)\]/g,
+      (match, propertyName) => {
+        return (
+          user[propertyName] || user.customProperties[propertyName] || match
+        );
+      }
+    );
+
+    const unsubscribeLink = `${unsubscribeBaseUrl}${user._id}`;
+    const emailContent = `${emailBody}<br><br>To unsubscribe, click <a href="${unsubscribeLink}">here</a>.`;
+
+    try {
+      await sendEmail(user.email, subject, emailContent);
+    } catch (error) {
+      console.error(`Failed to send email to ${user.email}:`, error);
+    }
+  }
+};
+
+const unsubscribeFromList = async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    user.isSubscribed = false;
+    await user.save();
+
+    res.status(200).json({ message: "Unsubscribed successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export { listController, userController, uploads, unsubscribeFromList };

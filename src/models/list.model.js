@@ -1,12 +1,13 @@
 import mongoose from "mongoose";
-import {CustomPropertySchema} from "./customProperty.model.js";
 
-const ListSchema = new mongoose.Schema(
-  {
-    title: String,
-    customProperties: [CustomPropertySchema],
-  },
-  { timestamps: true }
-);
+const PropertySchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  fallbackValue: { type: String, required: true },
+});
+
+const ListSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  properties: [PropertySchema],
+});
 
 export const List = mongoose.model("List", ListSchema);

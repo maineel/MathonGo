@@ -2,14 +2,14 @@ import { Router } from "express";
 import {
   listController,
   userController,
+  uploads,
+  unsubscribeFromList
 } from "../controllers/admin.controller.js";
-import multer from "multer";
 
 const adminRouter = Router();
 
-const upload = multer({ dest: "tmp/csv/" });
-
 adminRouter.route("/lists").post(listController);
-adminRouter.route("/lists/:listId/users").post(upload.single('file'),userController);
+adminRouter.route("/lists/:listId").post(uploads,userController);
+adminRouter.route("/unsubscribe/:userId").get(unsubscribeFromList);
 
 export { adminRouter };
