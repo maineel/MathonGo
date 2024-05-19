@@ -18,8 +18,8 @@ const transporter = nodemailer.createTransport({
   host: 'smtp.ethereal.email',
   port: 587,
   auth: {
-      user: 'providenci.schumm8@ethereal.email',
-      pass: 'qq3dRQWe1Bcp2QPc1s'
+      user: 'kelly.reichert@ethereal.email',
+      pass: 'sbryWbWbwwKMCaSdxg'
   }
 });
 
@@ -37,7 +37,7 @@ const listController = async (req, res) => {
 };
 
 const userController = async (req, res) => {
-  const { listId } = req.params;
+  const { listId } = req.body;
   const results = [];
   const errors = [];
   const successfullyAddedUsers = [];
@@ -183,7 +183,9 @@ const sendEmailsToUsers = async (req, res) => {
     const emailContent = `${emailBody}<br><br>To unsubscribe, click <a href="${unsubscribeLink}">here</a>.`;
 
     try {
-      if (!user.isSubscribed) continue;
+      if (!user.isSubscribed) {
+        res.status(200).json({ message: "User is not subscribed for mailing functionality!" });
+      };
       await sendEmail(user.email, subject, emailContent);
     } catch (error) {
       console.error(`Failed to send email to ${user.email}:`, error);
