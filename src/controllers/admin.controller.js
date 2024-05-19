@@ -15,12 +15,12 @@ const upload = multer({ dest: path.join(__dirname, "../uploads/") });
 const uploads = upload.single("file");
 
 const transporter = nodemailer.createTransport({
-  host: "smtp.ethereal.email",
+  host: 'smtp.ethereal.email',
   port: 587,
   auth: {
-    user: "armani93@ethereal.email",
-    pass: "XjPpSfP8ZTudxhp4er",
-  },
+      user: 'providenci.schumm8@ethereal.email',
+      pass: 'qq3dRQWe1Bcp2QPc1s'
+  }
 });
 
 // ==================================================== Controller Logic ====================================================
@@ -42,7 +42,7 @@ const userController = async (req, res) => {
   const errors = [];
   const successfullyAddedUsers = [];
 
-  fs.createReadStream(req.file.path)
+  fs.createReadStream(req.file?.path)
     .pipe(csvParser())
     .on("data", (data) => results.push(data))
     .on("end", async () => {
@@ -86,6 +86,8 @@ const userController = async (req, res) => {
             });
             await newUser.save();
             successfullyAddedUsers.push(newUser);
+            list.users.push(newUser);
+            await list.save();
             successCount++;
           } catch (error) {
             errorCount++;
@@ -125,9 +127,6 @@ const userController = async (req, res) => {
             totalCount,
           });
 
-          console.log(successfullyAddedUsers);
-          await sendEmailsToUsers(successfullyAddedUsers);
-
           fs.unlink(req.file.path, () => {});
         }
       } catch (error) {
@@ -150,7 +149,6 @@ const sendEmail = async (to, subject, html) => {
       subject: subject,
       html: html,
     });
-    console.log("Email sent:", info.messageId);
     return info.messageId;
   } catch (error) {
     console.error("Error sending email:", error);
@@ -158,18 +156,25 @@ const sendEmail = async (to, subject, html) => {
   }
 };
 
-const sendEmailsToUsers = async (users) => {
+const sendEmailsToUsers = async (req, res) => {
+  const listId  = req.params.listId;
   const unsubscribeBaseUrl = "http://localhost:8000/api/v1/admin/unsubscribe/";
   const subject = "Welcome to MathonGo";
   const emailTemplate =
     "Hey [name]!<br><br>Thank you for signing up with your email [email]. We have received your city as [city].<br><br> <b>Team MathonGo.</b>";
 
-  for (const user of users) {
+  const list = await List.findById(listId);
+  if (!list) {
+    return res.status(404).json({ error: "List not found" });
+  }
+
+  for (const userId of list.users) {
+    const user = await User.findById(userId);
     const emailBody = emailTemplate.replace(
       /\[(.*?)\]/g,
       (match, propertyName) => {
         return (
-          user[propertyName] || user.customProperties[propertyName] || match
+          user[propertyName] || (user.customProperties && user.customProperties[propertyName]) || match
         );
       }
     );
@@ -178,11 +183,13 @@ const sendEmailsToUsers = async (users) => {
     const emailContent = `${emailBody}<br><br>To unsubscribe, click <a href="${unsubscribeLink}">here</a>.`;
 
     try {
+      if (!user.isSubscribed) continue;
       await sendEmail(user.email, subject, emailContent);
     } catch (error) {
       console.error(`Failed to send email to ${user.email}:`, error);
     }
   }
+  return res.status(200).json({ message: "Emails sent successfully" });
 };
 
 const unsubscribeFromList = async (req, res) => {
@@ -202,4 +209,10 @@ const unsubscribeFromList = async (req, res) => {
   }
 };
 
-export { listController, userController, uploads, unsubscribeFromList };
+export {
+  listController,
+  userController,
+  uploads,
+  unsubscribeFromList,
+  sendEmailsToUsers,
+};
